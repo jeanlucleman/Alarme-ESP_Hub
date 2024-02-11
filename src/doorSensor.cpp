@@ -71,8 +71,8 @@
         {
           if(doorSensor[i].mac==mac and doorSensor[i].valid==true)
             {
-              Serial.printf("Le switch d'adresse %s (%s) a été récupéré pour l'objet n° %d",mac.c_str(),doorSensor[i].description.c_str(),i);
-              Serial.printf(" et le state en mémoire est %d\n", doorSensor[i].getState());
+              // Serial.printf("Le switch d'adresse %s (%s) a été récupéré pour l'objet n° %d",mac.c_str(),doorSensor[i].description.c_str(),i);
+              // Serial.printf(" et le state en mémoire est %d\n", doorSensor[i].getState());
               return &doorSensor[i];
             }
         }

@@ -27,6 +27,7 @@ Le doorsensor doit aussi envoyé sa version de firmware pour l'afficher dans la 
 #endif
 #include <version.h> 
 //Authentication Variables that will be used by the UDP clients (doorSensores)
+String AP_SSID, AP_PSW, STA_SSID, STA_PSW; 
 // String     AP_SSID;                  // WIFI Name of this Access Point giving access to the ESP8266 though AP mode (ex. 192.168.4.1)
 // String     AP_PSW;                   // Password to access this AP
 //Authentication Variables that will be used by the http clients (users)
@@ -57,7 +58,8 @@ char notReceived[4] = "BAD";
 char received[4] = "ACK";
 char* AckMsg;                           // Acknowledge message sent back to Client
 bool rebootRequested=false;             // When the server receive /reboot, this boolean is set to true and is read in the loop
-
+bool presence=true;                     // Indicates if an authorized person is present inside
+bool alarmActionRequested=false;        // Indicates to the loop if an action has to be set (ex. hooter)
 /* #region Fonctions */
   void handleClients();                   // Check if there is UDP clients and read, if any, incoming data
   void setupWifi();                       // Start wifi in AP and STA modes
@@ -68,6 +70,7 @@ bool rebootRequested=false;             // When the server receive /reboot, this
   bool setupClock();                      // Initialize a NTP client to connect on a NTP server to get time and date
   bool setClockFromOTP();                 // Get time and date from a NTP client and update the clock (see Clock class)
   void maintainClock();                   // Periodically check the clock and update
+  bool startStaMode();
 /* #endregion */
 //====================================================================================
 void setup() 
@@ -111,7 +114,7 @@ void loop()
     #ifdef OTA
       ArduinoOTA.handle();
     #endif
-    handleClients();            // Function to handle UDP client
+    handleClients();            // Function to handle UDP client, receiving info from door sensors
     maintainClock();            // Mise à jour de l'horloge une fois par heure (ou toutes les min si l'heure est manifestement fausse) */
     if(rebootRequested){ESP.restart();}
   }
@@ -128,29 +131,52 @@ void handleClients()
         debug(" from ");
         debug(Udp.remoteIP());
         debug(", port ");
-        debug(Udp.remotePort());
+        debugln(Udp.remotePort());
         int len = Udp.read(packetBuffer, 255);  //Read the packet into packetBufffer with an expected
                                                 // format  Switch=xyy:yy:yy:yy:yy:yy where x = 0 or 1 and yy:yy... is the MAC address of esp01 switch
+
         if (len > 0) 
           {
             packetBuffer[len] = 0;                             //Add a null character to end of packet
           }
-        debug(" : ");
         debugln(packetBuffer);
         //Check received data and send appropriate acknowledge back
         AckMsg = notReceived;                                  //Preset acknowledge message to 'BAD'
-        char* p;
-        p=strstr(packetBuffer,"Switch=");
-        if(len==26 and p)
+        char * myArray[5];//https://stackoverflow.com/questions/27325964/splitting-char-array
+        int index=0;
+        char *token;
+        const char s[2] = ",";
+        /* get the first token */
+        token = strtok(packetBuffer, s);
+
+        /* walk through other tokens */
+        while( token != NULL ) 
+        {
+            myArray[index] = (char *)  malloc (sizeof(char ) *(strlen(token) + 1));
+            strcpy(myArray[index],token);
+            index ++;
+            token = strtok(NULL, s);
+        }
+        debugln(myArray[0]);
+        debugln(myArray[1]);
+        debugln(myArray[2]);
+        debugln(myArray[3]);
+
+        // char* p;
+        // p=strstr(packetBuffer,"Switch=");
+        if(strcmp(myArray[0],"Switch")==0)
           {
             debugln("This packet is sent from a door sensor");
-            String myMac= String(packetBuffer).substring(8,25);
-            if (getDoorSensor(myMac)->setState(packetBuffer[7]))       // Report true if there is state changed
+            String myMac= myArray[2]; //String(packetBuffer).substring(8,25);
+            getDoorSensor(myMac)->firmware=myArray[3];
+            if (getDoorSensor(myMac)->setState(myArray[1][0]))       // Report true if there is state changed
               {
+                size_t state= getDoorSensor(myMac)->getState();
                 debug("The new state is ");
-                debugln((getDoorSensor(myMac)->getState()!=enmSwitchState::closed)?"Closed":"Open");
+                debugln((state!=enmSwitchState::closed)?"Closed":"Open");
                 debugln("--------------------------------------------------------------");
                 // Place here action needed when switch state changes
+                alarmActionRequested=(state==enmSwitchState::open?true:false);
               }
             else{debugln("No change");}
             AckMsg = received; 
@@ -160,7 +186,7 @@ void handleClients()
         Udp.endPacket();
     }
   }
-void getCredentials(String& AP_SSID, String& AP_PSW, String& STA_SSID, String& STA_PSW) // Read wifi credential from settings file
+void getCredentials() //String& AP_SSID, String& AP_PSW, String& STA_SSID, String& STA_PSW) // Read wifi credential from settings file
   {
     AP_SSID  = commonData.getValue("AP_SSID");
     AP_PSW   = commonData.getValue("AP_PSW");
@@ -180,8 +206,8 @@ void checkWifi()      // Function to check wifi status and to setup wifi when no
       }
   }
 void setupWifi(){                
-  String AP_SSID, AP_PSW, STA_SSID, STA_PSW; 
-  getCredentials(AP_SSID,AP_PSW, STA_SSID, STA_PSW);  // Gets credentials for AP and STA configuration
+
+  getCredentials();//AP_SSID,AP_PSW, STA_SSID, STA_PSW);  // Gets credentials for AP and STA configuration
   WiFi.mode(WIFI_AP_STA);                             //Set WiFi mode to AP and STA 
   debugln("WIFI Mode set to: AP Station");
   // Configuring AP
@@ -194,56 +220,58 @@ void setupWifi(){
   debugln(IP);
   // Starting UDP to exchange between switches and this ESP
   Udp.begin(UDPPort);                                    //Start UDP Server
-  // Udp.beginPacket("192.168.4.109", 9999);
-  // Udp.write("UDP Ready!");
-  // Udp.endPacket();
-  // debugln("UDP server started on access point");
+
 
   // Configuring STA
-  IPAddress local_IP ; 
-  IPAddress gateway;
-  IPAddress subnet;
-  IPAddress dns; // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
-  local_IP.fromString(commonData.getValue("staIp"));
-  gateway.fromString(commonData.getValue("staGateway")); //192, 168, 2, 1);
-  subnet.fromString(commonData.getValue("staSubnet")); //(255, 255, 0, 0);
-  dns.fromString(commonData.getValue("staDNS")); //(192, 168, 2, 1); // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
-    
-  if (!WiFi.config(local_IP, gateway, subnet, dns)) // Configures static IP address
-    {
-      debugln("STA Failed to configure");
-    }
-  WiFi.begin(STA_SSID.c_str(), STA_PSW.c_str());
-  delay(100);
-  debugln(F("Tentative de connexion en mode STA..."));
-  unsigned long startMillis = millis();
-  staModeOK=true;
-  while (WiFi.status() != WL_CONNECTED)
-    {
-      yield();
-      if (millis() > startMillis + 15000)
-        {
-          debugln(F("\nWifi connexion in STA mode timeout reached!"));
-          staModeOK=false;
-          break;
-        }
-      delay(1000);
-      debug(".");
-    }
-  if(staModeOK)
-    {
-      debugln("\nAdresse IP sur le réseau : " + WiFi.localIP().toString());
-      debugln("Adresse DNS              : " + WiFi.dnsIP().toString());
-      debugln("Gateway                  : " + WiFi.gatewayIP().toString());
-      debug("Connexion OK en mode STA sur ");
-      debugln(WiFi.localIP());
-    }
-  // Starting server (if STA mode fails, is accessible in AP mode on 192.168.4.1)
-  debug("Mac address: ")
-  debugln(WiFi.macAddress());
+  staModeOK=startStaMode();
   startServer(); 
 }
 
+bool startStaMode()
+  {
+    IPAddress local_IP ; 
+    IPAddress gateway;
+    IPAddress subnet;
+    IPAddress dns; // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
+    bool staModeSuccess;
+    local_IP.fromString(commonData.getValue("staIp"));
+    gateway.fromString(commonData.getValue("staGateway")); //192, 168, 2, 1);
+    subnet.fromString(commonData.getValue("staSubnet")); //(255, 255, 0, 0);
+    dns.fromString(commonData.getValue("staDNS")); //(192, 168, 2, 1); // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
+    if (!WiFi.config(local_IP, gateway, subnet, dns)) // Configures static IP address
+      {
+        debugln("STA Failed to configure");
+      }
+    WiFi.begin(STA_SSID.c_str(), STA_PSW.c_str());
+    delay(100);
+    debugln(F("Tentative de connexion en mode STA..."));
+    unsigned long startMillis = millis();
+    staModeSuccess=true;
+    while (WiFi.status() != WL_CONNECTED)
+      {
+        yield();
+        if (millis() > startMillis + 15000)
+          {
+            debugln(F("\nWifi connexion in STA mode timeout reached!"));
+            staModeSuccess=false;
+            break;
+          }
+        delay(1000);
+        debug(".");
+      }
+    if(staModeSuccess)
+      {
+        debugln("\nAdresse IP sur le réseau : " + WiFi.localIP().toString());
+        debugln("Adresse DNS              : " + WiFi.dnsIP().toString());
+        debugln("Gateway                  : " + WiFi.gatewayIP().toString());
+        debug("Connexion OK en mode STA sur ");
+        debugln(WiFi.localIP());
+      }
+    // Starting server (if STA mode fails, is accessible in AP mode on 192.168.4.1)
+    debug("Mac address: ")
+    debugln(WiFi.macAddress());
+    return staModeSuccess;
+  }
 /* #region Fonctions du serveur */
 
   String getFileContent(String fileName)
@@ -326,7 +354,7 @@ void setupWifi(){
       {
         debugln("getListSensors");
         String result="";
-        for (int i = 0; i < DoorSensor::doorSensorCount; i++)
+        for (size_t i = 0; i < DoorSensor::doorSensorCount; i++)
         {
           if(doorSensor[i].valid)
             {
@@ -334,7 +362,8 @@ void setupWifi(){
               Serial.println(doorSensor[i].mac);
               result+=doorSensor[i].mac+"," 
               +doorSensor[i].name + "," 
-              +doorSensor[i].description;  
+              +doorSensor[i].description + ","
+              +doorSensor[i].firmware;  
             }
 
         }
@@ -344,9 +373,9 @@ void setupWifi(){
       }
     String getSensorsStatus() //"000206,07:25,1,21:21,0";
       {
-        debugln("getSensorsStatus");
+        // debugln("getSensorsStatus");
         String result="";
-        for (int i = 0; i < DoorSensor::doorSensorCount; i++)
+        for (size_t i = 0; i < DoorSensor::doorSensorCount; i++)
         {
           if(doorSensor[i].valid)
             {
@@ -357,7 +386,7 @@ void setupWifi(){
             }
 
         }
-        debugln(result);
+        // debugln(result);
         return result;
 
       }
@@ -646,7 +675,7 @@ void setupWifi(){
       });
     server->on("/getSensorsStatus", HTTP_GET, [](AsyncWebServerRequest *request)
       {
-        debuglnDated(F("The server received a request 'getSensorsStatus'"));
+        // debuglnDated(F("The server received a request 'getSensorsStatus'"));
         String sensorsStatus=getSensorsStatus(); //"000206,07:25,1,21:21,0";
         request->send(200, "text/plain", sensorsStatus);
         // debuglnDated(F("The server returned file list"));

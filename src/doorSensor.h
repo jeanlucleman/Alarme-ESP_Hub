@@ -22,6 +22,7 @@
         // uint8_t index;
         String mac;
         String description;
+        String firmware;
         void deleteMe();
         bool valid; // when a sensor is no more used, this status become false. This will prevent to maintain this sensor in the settings file (sensorList.txt file)
         // bool stateClose;

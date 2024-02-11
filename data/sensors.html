@@ -24,17 +24,19 @@
                   <colgroup>
                     <col span="1" style="width: 15%%;">
                     <col span="1" style="width: 25px;">
-                    <col span="1" style="width: 40%%;">
-                    <col span="1" style="width: 40%%;">
+                    <col span="1" style="width: 36%%;">
+                    <col span="1" style="width: 36%%;">
+                    <col span="1" style="width: 14%%;">
                   </colgroup>
                   <TR style="border:1px solid black;background-color: #ede5d6;">
-                  <TD colspan=4 style="text-align:center"><H5>Liste des détecteurs</H5></TD>
+                  <TD colspan=5 style="text-align:center"><H5>Liste des détecteurs</H5></TD>
                   </TR>
                     <tr>
                     <td>Adresse MAC</td>
                     <td></td>
-                          <td>Nom</td>
+                    <td>Nom</td>
                     <td>Description</td>
+                    <td>Firmware</td>
                   </tr>`;
               data.forEach(function (item, index)
                 {
@@ -46,6 +48,7 @@
                       var macAddress=rs[0];
                       var name=rs[1];
                       var description=rs[2];
+                      var firmware=rs[3];
                       // alert(macAddress);
                       // alert(name);
                       // alert(description);
@@ -55,6 +58,8 @@
                         <TD><button style="font-size:16px" onclick="deleteMe('` + macAddress + `')"><i class="fa fa-trash-o"></i></button></TD>
                         <TD><input class='w3-input' type='text' id='idName` + index + `'  maxlength=25 value='` + name + `'  onchange="dataChanged()"></TD>
                         <TD><input class='w3-input' type='text' id='idDescription` + index + `'  maxlength=25 value='` + description + `'onchange="dataChanged()"></TD>
+                        <TD id='idFirmware` + index + `'>` + firmware + `</TD>
+  
                       </tr>`;  
                     }
                 })
